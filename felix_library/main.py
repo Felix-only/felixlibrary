@@ -1,3 +1,17 @@
+# Import required libraries
+import datetime
+import time
+from polygon import RESTClient
+from sqlalchemy import create_engine 
+from sqlalchemy import text
+import pandas as pd
+from math import sqrt
+from math import isnan
+import matplotlib.pyplot as plt
+from numpy import mean
+from numpy import std
+from math import floor
+
 def main(currency_pairs):
     """
     The Function run to data engineering code by MAX
