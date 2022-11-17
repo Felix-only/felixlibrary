@@ -12,6 +12,7 @@ from numpy import mean
 from numpy import std
 from math import floor
 import numpy as np
+import pandas as pd
 
 def keltner_channel(currency_pairs):
     """
@@ -59,6 +60,21 @@ def keltner_channel(currency_pairs):
             else:
                 name_with_col = name_with_col +':'+ lst[i]
         return name_with_col
+    
+    # write a function to clean the outlier of in the raw data values. 
+    def clean_outlier(pd_series):
+        '''
+        Input a pandas series, output a cleaned pandas series
+        '''
+        Q1 = pd_series.quantile(0.25)
+        Q3 = pd_series.quantile(0.75)
+        IQR = Q3 - Q1
+        
+        minimum_val = Q1 - 1.5*IQR
+        maximum_val = Q3 + 1.5*IQR
+        output = pd_series[(pd_series >= minimum_val) & (pd_series <= maximum_val)]
+        
+        return output
 
     # count how many item in a list, for counting N for the fd
     def count_range_in_list(li, min_, max_):
@@ -98,38 +114,41 @@ def keltner_channel(currency_pairs):
     def aggregate_raw_data_tables(engine,currency_pairs):
         with engine.begin() as conn:
             for curr in currency_pairs:
-                result = conn.execute(text('''SELECT 
-                                                    AVG(fxrate) as avg_price, 
-                                                    COUNT(fxrate) as tot_count, 
-                                                    MIN(fxrate) as min_price, 
-                                                    MAX(fxrate) as max_price 
-                                            FROM '''+curr[0]+curr[1]+"_raw;"))
-                for row in result:
-                    avg_price = row.avg_price
-                    tot_count = row.tot_count
-                    min_price = row.min_price
-                    max_price = row.max_price
-                    vol = max_price - min_price
-                    # add keltner channel (KCUB and KCLB) into our table, put name and values in the dictionary
-                    keltner_dic = {}
-                    kcub_values = []
-                    kclb_values = []
-                    kcub_name = get_col_name('kcub', 100)
-                    kclb_name = get_col_name('kclb', 100)
-                    for i in range(100):
-                        kcub_values.append(avg_price + (i+1)*0.025*vol)
-                        kclb_values.append(avg_price - (i+1)*0.025*vol)
-                    for i in range(100):
-                        keltner_dic[kcub_name[i]] = kcub_values[i]
-                    for i in range(100):
-                        keltner_dic[kclb_name[i]] = kclb_values[i]
+                
                 #get the fxrate in our raw data for fd calculation 
                 fxrate_res = conn.execute(text("SELECT fxrate FROM "+curr[0]+curr[1]+"_raw;"))
                 fxrate_data = [row.fxrate for row in fxrate_res]
+                # use pandas to clean the data
+                fxrate_series = pd.Series(fxrate_data)
+                clean_fxrate =clean_outlier(fxrate_series)
+                # calcuate avg, count, min, max , and vol in the clean data.
+                avg_price = clean_fxrate.mean()
+                tot_count = clean_fxrate.count()
+                min_price = clean_fxrate.min()
+                max_price = clean_fxrate.max()
+                vol = max_price - min_price
+                
+                # add keltner channel (KCUB and KCLB) into our table, put name and values in the dictionary
+                keltner_dic = {}
+                kcub_values = []
+                kclb_values = []
+                kcub_name = get_col_name('kcub', 100)
+                kclb_name = get_col_name('kclb', 100)
+                for i in range(100):
+                    kcub_values.append(avg_price + (i+1)*0.025*vol)
+                    kclb_values.append(avg_price - (i+1)*0.025*vol)
+                for i in range(100):
+                    keltner_dic[kcub_name[i]] = kcub_values[i]
+                for i in range(100):
+                    keltner_dic[kclb_name[i]] = kclb_values[i]
+                
+                # after calculation make to series to list.  
+                fxrate_data = clean_fxrate.to_list()
                 # then we will slice the data into increasing range
                 increase_bound = np.split(fxrate_data, np.where(np.diff(fxrate_data) < 0)[0]+1)
                 increase_revert_bound = [(increase_bound[i][0], increase_bound[i-1][-1]) for i in range(1, len(increase_bound))]
                 
+           
                 std_res = conn.execute(text("SELECT SUM((fxrate - "+str(avg_price)+")*(fxrate - "+str(avg_price)+"))/("+str(tot_count)+"-1) as std_price FROM "+curr[0]+curr[1]+"_raw;"))
                 for row in std_res:
                     std_price = sqrt(row.std_price)
@@ -173,7 +192,6 @@ def keltner_channel(currency_pairs):
                 conn.execute(text("INSERT INTO "+curr[0]+curr[1]+
                                 f'''_agg VALUES (:inserttime, :avgfxrate, :minfxrate, :maxfxrate, :vol, :fd, {colon_name});'''),
                             dic_insert)
-            
             
             
             
