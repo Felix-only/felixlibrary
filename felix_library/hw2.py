@@ -4,7 +4,6 @@ import time
 from polygon import RESTClient
 from sqlalchemy import create_engine 
 from sqlalchemy import text
-import pandas as pd
 from math import sqrt
 from math import isnan
 import matplotlib.pyplot as plt
