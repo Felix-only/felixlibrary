@@ -23,42 +23,6 @@ def keltner_channel(currency_pairs):
     ########################################################
     #this is the function that main needed:
     # write a function to dml the keltner channel column
-    def get_keltner_channel_dml():    
-        kcub_col_dml = ''
-        kclb_col_dml = ''
-        for i in range(100):
-            if i < 99:
-                kcub_col_dml = kcub_col_dml + 'kcub' + str(i+1) + ' numeric, '
-                kclb_col_dml = kclb_col_dml + 'kclb' + str(i+1) + ' numeric, '
-            else:
-                kcub_col_dml = kcub_col_dml + 'kcub' + str(i+1) + ' numeric, '
-                kclb_col_dml = kclb_col_dml + 'kclb' + str(i+1) + ' numeric'    
-        return kcub_col_dml+kclb_col_dml
-
-    # write a function to return a list of name
-    def get_col_name(column_name, index):
-        """
-        the function return a list of (name and with index name attached) 
-
-        :param column_name: str 
-        :type column_name: str
-        :param index: int 
-        :type index: int
-        """
-        col_name = []
-        for i in range(index):
-            col_name.append(column_name + str(i+1))
-        return col_name
-
-    #input a list of name and output a long str with colon infront of the name
-    def get_name_colon(lst):
-        name_with_col = ''
-        for i in range(100):
-            if i <99: 
-                name_with_col = name_with_col +':'+ lst[i] + ', '
-            else:
-                name_with_col = name_with_col +':'+ lst[i]
-        return name_with_col
     
     # write a function to clean the outlier of in the raw data values. 
     def clean_outlier(pd_series):
@@ -105,8 +69,8 @@ def keltner_channel(currency_pairs):
         with engine.begin() as conn:
             for curr in currency_pairs:
                 conn.execute(text("CREATE TABLE "+curr[0]+curr[1]+
-                                '''_agg(inserttime text, avgfxrate  numeric, minfxrate numeric, 
-                                    maxfxrate numeric, vol numeric, fd numeric, ''' + get_keltner_channel_dml() +");"))
+                                '''_agg(avgfxrate  numeric, minfxrate numeric, 
+                                    maxfxrate numeric, vol numeric, fd numeric); ''' ))
 
     # This function is called every 6 minutes to aggregate the data, store it in the aggregate table, 
     # and then delete the raw data
@@ -128,18 +92,11 @@ def keltner_channel(currency_pairs):
                 vol = max_price - min_price
                 
                 # add keltner channel (KCUB and KCLB) into our table, put name and values in the dictionary
-                keltner_dic = {}
                 kcub_values = []
                 kclb_values = []
-                kcub_name = get_col_name('kcub', 100)
-                kclb_name = get_col_name('kclb', 100)
                 for i in range(100):
                     kcub_values.append(avg_price + (i+1)*0.025*vol)
                     kclb_values.append(avg_price - (i+1)*0.025*vol)
-                for i in range(100):
-                    keltner_dic[kcub_name[i]] = kcub_values[i]
-                for i in range(100):
-                    keltner_dic[kclb_name[i]] = kclb_values[i]
                 
                 # after calculation make to series to list.  
                 fxrate_data = clean_fxrate.to_list()
@@ -147,13 +104,6 @@ def keltner_channel(currency_pairs):
                 increase_bound = np.split(fxrate_data, np.where(np.diff(fxrate_data) < 0)[0]+1)
                 increase_revert_bound = [(increase_bound[i][0], increase_bound[i-1][-1]) for i in range(1, len(increase_bound))]
                 
-           
-                std_res = conn.execute(text("SELECT SUM((fxrate - "+str(avg_price)+")*(fxrate - "+str(avg_price)+"))/("+str(tot_count)+"-1) as std_price FROM "+curr[0]+curr[1]+"_raw;"))
-                for row in std_res:
-                    std_price = sqrt(row.std_price)
-                date_res = conn.execute(text("SELECT MAX(ticktime) as last_date FROM "+curr[0]+curr[1]+"_raw;"))   
-                for row in date_res:
-                    last_date = row.last_date
                 
                 # get FD values
                 # first make copy of the list
@@ -179,20 +129,13 @@ def keltner_channel(currency_pairs):
                         # after we calculate N_count, we can calculate fd by dividing the vol
                         fd = N_count / vol
                         curr[2].append(keltner_values)
-                #update the dictionary for inserting to the table
-                dic_insert = {"inserttime": last_date, "avgfxrate": avg_price, 
-                            "minfxrate": min_price, "maxfxrate": max_price, "vol": vol, "fd":fd}
-                dic_insert.update(keltner_dic)
-                
-                colon_name = get_name_colon(kcub_name) + ', '+ get_name_colon(kclb_name)
-                
                 
                 #insert the values into the agg tables
                 conn.execute(text("INSERT INTO "+curr[0]+curr[1]+
-                                f'''_agg VALUES (:inserttime, :avgfxrate, :minfxrate, :maxfxrate, :vol, :fd, {colon_name});'''),
-                            dic_insert)
-            
-            
+                                '''_agg VALUES (:avgfxrate, :minfxrate, :maxfxrate, :vol, :fd);'''),
+                            {'avgfxrate': avg_price, 'minfxrate': min_price,  'maxfxrate': max_price, 'vol': vol, 'fd': fd})
+                
+                
             
 
     ########################################################
@@ -214,8 +157,7 @@ def keltner_channel(currency_pairs):
     # Open a RESTClient for making the api calls
     client = RESTClient(key)
     # Loop that runs until the total duration of the program hits 24 (10) hours. 
-    while count < 36600: # 86400 seconds = 24 hours || 36000 seconds = 10 hours |+| 600 seconds = 10min
-
+    while count <= 36000: # 86400 seconds = 24 hours || 36000 seconds = 10 hours 
         # Make a check to see if 6 minutes has been reached or not
         if agg_count == 360:
             # Aggregate the data and clear the raw data tables
